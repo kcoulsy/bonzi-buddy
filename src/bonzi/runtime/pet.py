@@ -8,9 +8,14 @@ from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCursor, QPainter, QPixmap
 from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
 
+from .. import content
 from ..acs.model import Character
+from . import features
 from .balloon import Balloon
+from .options_dialog import OptionsDialog
 from .player import AnimationPlayer
+from .settings import Settings
+from .sound import SoundBank
 from .tts import TtsEngine
 
 # animation names present in Bonzi.acs, grouped by intent
@@ -36,6 +41,7 @@ class BonziPet(QWidget):
             | Qt.WindowType.Tool,
         )
         self.char = char
+        self.settings = Settings()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle(char.name or "Bonzi")
         self.setFixedSize(char.width, char.height)
@@ -49,10 +55,17 @@ class BonziPet(QWidget):
         self.player.frame_ready.connect(self._on_frame)
         self.player.finished.connect(self._on_anim_finished)
 
+        self.sounds = SoundBank(char.sounds, self)
+        self.player.sound_triggered.connect(self.sounds.play)
+
         self.tts = TtsEngine(char.voice, self)
         self.tts.stopped.connect(self._on_tts_stopped)
 
         self.balloon = Balloon()
+
+        # lip-sync: swaps mouth shapes while speaking
+        self._mouth_timer = QTimer(self)
+        self._mouth_timer.timeout.connect(self._animate_mouth)
 
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._maybe_idle)
@@ -83,7 +96,13 @@ class BonziPet(QWidget):
         self.show()
         if not self.player.play(SHOW_ANIM):
             self.player.play(REST_ANIM)
-        QTimer.singleShot(600, lambda: self.say("Hello! I'm Bonzi. Right-click me!"))
+        greeting = (
+            "Hello! I'm Bonzi. Right-click me to see what I can do!"
+            if self.settings.first_run
+            else f"Welcome back, {self.settings.name}! Right-click me anytime."
+        )
+        self.settings.first_run = False
+        QTimer.singleShot(700, lambda: self.say(greeting))
 
     def leave(self) -> None:
         self.tts.stop()
@@ -99,25 +118,37 @@ class BonziPet(QWidget):
             return
         self._speaking = True
         self._show_balloon(text)
-        if self.tts.available:
-            self.tts.started.connect(self._noop)
+        self.player.hard_stop()  # hold the rest pose; the mouth does the work
+        if self.tts.available and self.settings.tts_enabled:
             self.tts.speak(text)
         else:
-            # no engine: keep the balloon up a readable while
-            QTimer.singleShot(1500 + 40 * len(text), self._on_tts_stopped)
-        self._talk_loop()
+            # no engine (or muted): keep the balloon up a readable while
+            QTimer.singleShot(1400 + 45 * len(text), self._on_tts_stopped)
 
-    def _noop(self) -> None:
-        pass
+        if self.player.has_mouth_shapes:
+            self._mouth_timer.start(85)
+            self._animate_mouth()
+        else:
+            self.player.play(TALK_ANIM) or self.player.play(REST_ANIM)
 
-    def _talk_loop(self) -> None:
-        if self._speaking:
-            if not self.player.play(TALK_ANIM):
-                self.player.play(REST_ANIM)
+    def _animate_mouth(self) -> None:
+        """Swap mouth shapes to fake visemes while TTS plays."""
+        if not self._speaking:
+            return
+        # bias toward open shapes so it reads as talking; occasional closed pause
+        mouth = random.choices([0, 1, 2, 3, 4, 5, 6], weights=[3, 4, 6, 6, 6, 4, 3])[0]
+        pix = self.player.speaking_pixmap(mouth)
+        if pix is not None:
+            self._on_frame(pix)
 
     def _on_tts_stopped(self) -> None:
         self._speaking = False
+        self._mouth_timer.stop()
         self.balloon.hide()
+        # settle on the closed mouth, then resume idling
+        closed = self.player.speaking_pixmap(0)
+        if closed is not None:
+            self._on_frame(closed)
         self.player.play(REST_ANIM)
 
     def _show_balloon(self, text: str) -> None:
@@ -142,10 +173,9 @@ class BonziPet(QWidget):
 
     def _on_anim_finished(self, name: str) -> None:
         self._busy = False
-        if self._speaking and name == TALK_ANIM:
-            self._talk_loop()  # keep gesturing until TTS ends
-            return
-        if not self._speaking and name not in (HIDE_ANIM,):
+        if self._speaking:
+            return  # lip-sync owns the display while speaking
+        if name not in (HIDE_ANIM,):
             self.player.play(REST_ANIM)
 
     def play_animation(self, name: str) -> None:
@@ -175,13 +205,24 @@ class BonziPet(QWidget):
 
     def _show_menu(self) -> None:
         menu = QMenu()
-        act_say = QAction("Say something…", menu)
-        act_say.triggered.connect(self._prompt_say)
-        menu.addAction(act_say)
 
-        act_joke = QAction("Tell me a joke", menu)
-        act_joke.triggered.connect(self._joke)
-        menu.addAction(act_joke)
+        def add(label: str, slot) -> None:
+            act = QAction(label, menu)
+            act.triggered.connect(slot)
+            menu.addAction(act)
+
+        add("Say something…", self._prompt_say)
+        add("Tell me a joke", self._joke)
+        add("Tell an amazing fact", self._fact)
+        add("Sing me a song", self._sing)
+        menu.addSeparator()
+        add("Search the web…", self._prompt_search)
+
+        surf = menu.addMenu("Go online")
+        for label, url in features.LINKS.items():
+            a = QAction(label, surf)
+            a.triggered.connect(lambda _=False, u=url: features.open_url(u))
+            surf.addAction(a)
 
         anim_menu = menu.addMenu("Animate")
         for name in sorted(a.name for a in self.char.animations):
@@ -190,9 +231,8 @@ class BonziPet(QWidget):
             anim_menu.addAction(act)
 
         menu.addSeparator()
-        act_quit = QAction("Goodbye (quit)", menu)
-        act_quit.triggered.connect(self.leave)
-        menu.addAction(act_quit)
+        add("Options…", self._options)
+        add("Goodbye (quit)", self.leave)
         menu.exec(QCursor.pos())
 
     def _prompt_say(self) -> None:
@@ -202,13 +242,25 @@ class BonziPet(QWidget):
 
     def _joke(self) -> None:
         self.play_animation("Pleased")
-        self.say(random.choice(_JOKES))
+        QTimer.singleShot(400, lambda: self.say(content.random_joke()))
 
+    def _fact(self) -> None:
+        self.play_animation("Reading")
+        QTimer.singleShot(400, lambda: self.say(content.random_fact()))
 
-_JOKES = [
-    "Why did the computer go to the doctor? It had a virus!",
-    "I'm not saying I'm Batman, I'm just saying nobody has ever seen me and Batman in the same room.",
-    "Why was the math book sad? It had too many problems.",
-    "I told my computer I needed a break, and now it won't stop sending me KitKats.",
-    "What do you call a monkey in a minefield? A ba-boom!",
-]
+    def _sing(self) -> None:
+        # play a singing animation (its embedded audio plays via sound_triggered)
+        for name in ("Sing", "Announce", "Congratulate", "Pleased"):
+            if self.char.animation(name):
+                self.play_animation(name)
+                break
+
+    def _prompt_search(self) -> None:
+        query, ok = QInputDialog.getText(self, "Bonzi Search", "What shall I search for?")
+        if ok and query.strip():
+            self.say(f"Let me search the web for {query}!")
+            features.search(query.strip(), self.settings.search_engine)
+
+    def _options(self) -> None:
+        dlg = OptionsDialog(self.settings, self.tts.available)
+        dlg.exec()

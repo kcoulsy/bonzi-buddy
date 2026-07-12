@@ -25,6 +25,7 @@ class AnimationPlayer(QObject):
 
     frame_ready = Signal(QPixmap)
     finished = Signal(str)  # name of the animation that just ended
+    sound_triggered = Signal(int)  # embedded-sound index for the current frame
 
     def __init__(self, char: Character, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -85,6 +86,43 @@ class AnimationPlayer(QObject):
         self._frame_cache[key] = pix
         return pix
 
+    def speaking_pixmap(self, mouth_type: int, base_anim: str = "RestPose") -> QPixmap | None:
+        """A held base pose with the mouth-shape overlay for ``mouth_type`` (0..6).
+
+        Used for lip-sync while TTS plays: the character stays in its rest pose
+        and only the mouth swaps, exactly as Microsoft Agent drove visemes.
+        """
+        anim = self.char.animation(base_anim)
+        if anim is None or not anim.frames:
+            return None
+        key = ("__speak__", base_anim, mouth_type)
+        cached = self._frame_cache.get(key)
+        if cached is not None:
+            return cached
+        frame = anim.frames[0]
+        canvas = QImage(self.char.width, self.char.height, QImage.Format.Format_RGBA8888)
+        canvas.fill(0)
+        painter = QPainter(canvas)
+        for fi in frame.images:
+            if 0 <= fi.image_index < len(self.char.images):
+                sp = self.char.images[fi.image_index]
+                if sp.width and sp.height:
+                    painter.drawImage(fi.x, fi.y, _sprite_to_qimage(sp.rgba, sp.width, sp.height))
+        overlay = next((o for o in frame.mouth_overlays if o.type == mouth_type), None)
+        if overlay and 0 <= overlay.image_index < len(self.char.images):
+            sp = self.char.images[overlay.image_index]
+            if sp.width and sp.height:
+                painter.drawImage(overlay.x, overlay.y, _sprite_to_qimage(sp.rgba, sp.width, sp.height))
+        painter.end()
+        pix = QPixmap.fromImage(canvas)
+        self._frame_cache[key] = pix
+        return pix
+
+    @property
+    def has_mouth_shapes(self) -> bool:
+        anim = self.char.animation("RestPose")
+        return bool(anim and anim.frames and anim.frames[0].mouth_overlays)
+
     def _next_index(self, frame: Frame, idx: int) -> int | None:
         """Resolve the next frame index, honouring branches and exit requests."""
         if self._stop_requested and frame.exit_frame is not None:
@@ -110,6 +148,8 @@ class AnimationPlayer(QObject):
 
         self.frame_ready.emit(self._composite(anim, idx))
         frame = anim.frames[idx]
+        if frame.sound_index is not None:
+            self.sound_triggered.emit(frame.sound_index)
 
         nxt = self._next_index(frame, idx)
         if nxt is None:
