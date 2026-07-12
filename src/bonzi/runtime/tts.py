@@ -1,14 +1,20 @@
-"""Text-to-speech via a Linux CLI engine (espeak-ng / espeak / spd-say).
+"""Text-to-speech via platform-native or CLI engines.
 
 Runs the engine in a worker thread so the UI never blocks, and reports start/end
 so the character can gesture while it talks. Voice pitch/speed are seeded from
 the .acs voice block to approximate Bonzi's original delivery.
+
+Supported engines (checked in order):
+  Linux   – espeak-ng, espeak, spd-say
+  macOS   – say (built-in)
+  Windows – PowerShell + System.Speech (built-in)
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 
 from PySide6.QtCore import QObject, QThread, Signal
 
@@ -17,6 +23,26 @@ from ..acs.model import Voice
 
 def _find_engine() -> list[str] | None:
     """Return a base command (without text) for the first available engine."""
+    if sys.platform == "win32":
+        ps = shutil.which("powershell")
+        if ps:
+            return [
+                ps,
+                "-NoProfile",
+                "-Command",
+                "$t=[Console]::In.ReadToEnd();"
+                "Add-Type -AssemblyName System.Speech;"
+                "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+                "$s.Speak($t)",
+            ]
+        return None
+
+    if sys.platform == "darwin":
+        if shutil.which("say"):
+            return ["say"]
+        return None
+
+    # Linux
     if shutil.which("espeak-ng"):
         return ["espeak-ng"]
     if shutil.which("espeak"):
@@ -92,7 +118,11 @@ class TtsEngine(QObject):
         text = text.strip()
         if not text or not self._base:
             return
-        self._launch([*self._base, *self._extra, text])
+        if sys.platform == "win32":
+            # Windows PowerShell engine reads text from stdin
+            self._launch([*self._base, *self._extra], text)
+        else:
+            self._launch([*self._base, *self._extra, text])
 
     def sing(self, ssml: str, wpm: int) -> None:
         """Sing an SSML document (per-syllable pitch) via espeak-ng SSML mode."""
@@ -100,12 +130,19 @@ class TtsEngine(QObject):
             return
         self._launch([*self._base, "-m", "-s", str(wpm), ssml])
 
-    def _launch(self, cmd: list[str]) -> None:
+    def _launch(self, cmd: list[str], text: str | None = None) -> None:
         self.stop()
         try:
-            proc = subprocess.Popen(cmd)
+            if text is not None:
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            else:
+                proc = subprocess.Popen(cmd)
         except Exception:
+            self.stopped.emit()
             return
+        if text is not None:
+            proc.stdin.write(text.encode("utf-8"))
+            proc.stdin.close()
         worker = _SpeakWorker(proc)
         worker.started.connect(self.started.emit)
         worker.finished.connect(self._on_finished)

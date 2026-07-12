@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 _PAD = 12
@@ -91,8 +91,16 @@ class Balloon(QWidget):
         w = min(_MAX_W, max((fm.horizontalAdvance(ln) for ln in self._lines), default=0)) + _PAD * 2
         h = fm.height() * len(self._lines) + _PAD * 2 + _TAIL
         self.resize(w, h)
-        # place so the tail points down at the character's head
-        self.move(int(anchor_center_x - w / 2), int(anchor_top_y - h))
+
+        # place above the anchor; clamp to screen bounds
+        x = int(anchor_center_x - w / 2)
+        y = int(anchor_top_y - h)
+        screen = QGuiApplication.screenAt(QPoint(anchor_center_x, anchor_top_y))
+        if screen is not None:
+            ag = screen.availableGeometry()
+            x = max(ag.left(), min(x, ag.right() - w))
+            y = max(ag.top(), y)
+        self.move(x, y)
         self.show()
         self.raise_()
         self.update()

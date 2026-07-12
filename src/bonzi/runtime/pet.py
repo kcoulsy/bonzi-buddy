@@ -5,8 +5,8 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QCursor, QPainter, QPixmap
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QCursor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
 
 from .. import content
@@ -101,9 +101,26 @@ class BonziPet(QWidget):
 
     # -- placement / painting --
 
+    def _available_screen_geometry(self) -> QRect:
+        screen = self.screen()
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, 1920, 1080)
+        return screen.availableGeometry()
+
+    def _clamp_pos(self, x: int, y: int, w: int, h: int) -> tuple[int, int]:
+        sg = self._available_screen_geometry()
+        x = max(sg.left(), min(x, sg.right() - w))
+        y = max(sg.top(), min(y, sg.bottom() - h))
+        return x, y
+
     def _place_bottom_right(self) -> None:
-        screen = self.screen().availableGeometry()
-        self.move(screen.right() - self.width() - 40, screen.bottom() - self.height() - 40)
+        sg = self._available_screen_geometry()
+        x = sg.right() - self.width() - 40
+        y = sg.bottom() - self.height() - 40
+        x, y = self._clamp_pos(x, y, self.width(), self.height())
+        self.move(x, y)
 
     def _on_frame(self, pix: QPixmap) -> None:
         self._pix = pix
@@ -261,7 +278,9 @@ class BonziPet(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         if self._drag_offset is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            pos = event.globalPosition().toPoint() - self._drag_offset
+            cx, cy = self._clamp_pos(pos.x(), pos.y(), self.width(), self.height())
+            self.move(cx, cy)
             if self.balloon.isVisible():
                 self._reposition_balloon()
 

@@ -56,13 +56,18 @@ dragged correctly on both X11 and Wayland desktop sessions. Set
 
 ## Voice (Optional)
 
-Install a local text-to-speech engine to let Bonzi talk. Without one, speech
-still appears in the balloon.
+Bonzi can speak on every platform — no install required on macOS or Windows.
 
-```bash
-sudo pacman -S espeak-ng
-# Alternatives: festival or speech-dispatcher (spd-say)
-```
+* **macOS** — uses the built-in `say` command automatically.
+* **Windows** — uses PowerShell + System.Speech (built into .NET).
+* **Linux** — install a local engine: espeak-ng, espeak, or speech-dispatcher (spd-say).
+
+  ```bash
+  sudo pacman -S espeak-ng
+  # Alternatives: festival or speech-dispatcher (spd-say)
+  ```
+
+Without any engine, speech still appears in the balloon.
 
 ## Project Status
 
