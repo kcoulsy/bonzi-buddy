@@ -1,0 +1,30 @@
+# --- Original decompiled / reference code: NOT committed ---
+/decompiled/
+/reference/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# --- Build / packaging output ---
+/build/
+/dist/
+/packaging/build/
+/packaging/dist/
+*.spec.bak
+pkgroot/
+*.deb
+*.pkg.tar.zst
+*.dmg
+*.AppImage
+
+# --- Editor / OS ---
+.DS_Store
+*.swp
+.idea/
+.vscode/
