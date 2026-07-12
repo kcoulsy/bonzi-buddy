@@ -27,14 +27,33 @@ def _find_engine() -> list[str] | None:
 
 
 class _SpeakWorker(QThread):
-    def __init__(self, cmd: list[str], text: str) -> None:
+    """Waits for an already-started engine process so the UI never blocks.
+
+    The process is created by :meth:`TtsEngine.speak` on the caller's thread, so
+    it always exists by the time :meth:`stop_process` may need to kill it.
+    """
+
+    def __init__(self, proc: subprocess.Popen) -> None:
         super().__init__()
-        self._cmd = cmd
-        self._text = text
+        self._proc = proc
 
     def run(self) -> None:
         try:
-            subprocess.run([*self._cmd, self._text], check=False)
+            self._proc.wait()
+        except Exception:
+            pass
+
+    def stop_process(self) -> None:
+        """Kill the engine so its audio stops immediately."""
+        proc = self._proc
+        if proc.poll() is not None:
+            return
+        try:
+            proc.terminate()
+            try:
+                proc.wait(0.2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
         except Exception:
             pass
 
@@ -69,18 +88,28 @@ class TtsEngine(QObject):
         if not text or not self._base:
             return
         self.stop()
-        worker = _SpeakWorker([*self._base, *self._extra], text)
+        try:
+            proc = subprocess.Popen([*self._base, *self._extra, text])
+        except Exception:
+            return
+        worker = _SpeakWorker(proc)
         worker.started.connect(self.started.emit)
         worker.finished.connect(self._on_finished)
         self._worker = worker
         worker.start()
 
     def stop(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.terminate()
-            self._worker.wait(200)
+        if self._worker is not None:
+            # Kill the engine process first, then let run() return and join.
+            self._worker.stop_process()
+            if self._worker.isRunning():
+                self._worker.wait(300)
         self._worker = None
 
     def _on_finished(self) -> None:
+        # Ignore the tail of a worker we already replaced/stopped, so it can't
+        # null out the current worker or hide a fresh balloon.
+        if self.sender() is not self._worker:
+            return
         self._worker = None
         self.stopped.emit()

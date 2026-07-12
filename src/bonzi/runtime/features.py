@@ -23,7 +23,7 @@ DEFAULT_ENGINE = "Google (Default)"
 
 # quick links from the original's toolbar / About box
 LINKS: dict[str, str] = {
-    "BonziBUDDY home (tmafe)": "https://www.tmafe.com/bonzibuddy",
+    "BonziBUDDY home": "https://kcoulsy.github.io/bonzi-buddy/",
     "Get more themes": "https://tmafe.com/bonzibuddy/themes",
     "Support": "https://www.tmafe.com/bonzibuddy/support",
     "MS Agent revival": "https://tmafe.com/msagent",

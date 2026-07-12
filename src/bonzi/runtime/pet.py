@@ -12,9 +12,17 @@ from .. import content
 from ..acs.model import Character
 from . import features
 from .balloon import Balloon
+from .calendar import (
+    ATTENTION_ANIMS,
+    AppointmentStore,
+    CalendarDialog,
+    default_store_path,
+    fire_due_reminders,
+)
 from .downloader import DownloadManager
 from .options_dialog import OptionsDialog
 from .player import AnimationPlayer
+from .reader import Book, ReaderDialog, list_books
 from .settings import Settings
 from .sound import SoundBank
 from .tts import TtsEngine
@@ -50,8 +58,16 @@ class BonziPet(QWidget):
         self._pix: QPixmap | None = None
         self._drag_offset: QPoint | None = None
         self._downloader: DownloadManager | None = None
+        self._calendar: CalendarDialog | None = None
+        self._reader: ReaderDialog | None = None
         self._speaking = False
         self._busy = False  # a one-shot animation (greet/idle/emote) is playing
+
+        # calendar reminders: a shared JSON store polled by a timer
+        self._appointments = AppointmentStore(default_store_path())
+        self._attention_anim = next(
+            (n for n in ATTENTION_ANIMS if self.char.animation(n)), None
+        )
 
         self.player = AnimationPlayer(char, self)
         self.player.frame_ready.connect(self._on_frame)
@@ -72,6 +88,10 @@ class BonziPet(QWidget):
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._maybe_idle)
         self._idle_timer.start(9000)
+
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.timeout.connect(self._check_reminders)
+        self._reminder_timer.start(30_000)
 
         self._place_bottom_right()
 
@@ -111,6 +131,21 @@ class BonziPet(QWidget):
         self.balloon.hide()
         self.player.play(HIDE_ANIM)
         QTimer.singleShot(900, self.quit_requested.emit)
+
+    def cleanup(self) -> None:
+        """Stop all timers/audio before the app tears down.
+
+        A repeating timer (mouth lip-sync, idle, reminders) firing into
+        half-destroyed Qt objects during shutdown crashes the interpreter, so
+        everything must be quiesced here. Wired to QApplication.aboutToQuit.
+        """
+        self._speaking = False
+        for timer in (self._mouth_timer, self._idle_timer, self._reminder_timer):
+            timer.stop()
+        self.player.hard_stop()
+        self.tts.stop()
+        self.sounds.stop_all()
+        self.balloon.hide()
 
     # -- speech --
 
@@ -217,10 +252,23 @@ class BonziPet(QWidget):
         add("Tell me a joke", self._joke)
         add("Tell an amazing fact", self._fact)
         add("Sing me a song", self._sing)
+
+        story_menu = menu.addMenu("Read me a story")
+        books = list_books()
+        if books:
+            for book in books:
+                a = QAction(book.name, story_menu)
+                a.triggered.connect(lambda _=False, b=book: self._open_reader(b))
+                story_menu.addAction(a)
+        else:
+            none_act = QAction("(no books found)", story_menu)
+            none_act.setEnabled(False)
+            story_menu.addAction(none_act)
         menu.addSeparator()
         add("Search the web…", self._prompt_search)
 
         add("Download Manager…", self._open_downloader)
+        add("Calendar…", self._open_calendar)
         menu.addSeparator()
 
         surf = menu.addMenu("Go online")
@@ -254,17 +302,28 @@ class BonziPet(QWidget):
         QTimer.singleShot(400, lambda: self.say(content.random_fact()))
 
     def _sing(self) -> None:
-        # play a singing animation (its embedded audio plays via sound_triggered)
-        for name in ("Sing", "Announce", "Congratulate", "Pleased"):
-            if self.char.animation(name):
-                self.play_animation(name)
-                break
+        song = content.random_song()
+        if song is None:
+            self.say("La la la! I don't have my songbook right now.")
+            return
+        lyrics = content.song_lyrics(song)
+        intro = f"Here's a song for you — {song['title']}, by {song['author']}. ♪"
+        self.say(f"{intro} {lyrics}")
 
     def _prompt_search(self) -> None:
         query, ok = QInputDialog.getText(self, "Bonzi Search", "What shall I search for?")
         if ok and query.strip():
             self.say(f"Let me search the web for {query}!")
             features.search(query.strip(), self.settings.search_engine)
+
+    def _open_reader(self, book: Book) -> None:
+        """Open the Storybook Reader for ``book``, one window at a time."""
+        if self._reader is not None:
+            self._reader.close()
+        self._reader = ReaderDialog(book, self)
+        self._reader.show()
+        self._reader.raise_()
+        self._reader.activateWindow()
 
     def _open_downloader(self) -> None:
         """Open the Download Manager, keeping a single shared instance."""
@@ -273,6 +332,30 @@ class BonziPet(QWidget):
         self._downloader.show()
         self._downloader.raise_()
         self._downloader.activateWindow()
+
+    def _open_calendar(self) -> None:
+        """Open the Calendar dialog, keeping a single shared instance.
+
+        The dialog owns a separate store over the same JSON file as the reminder
+        timer; both read/write the one path, so edits and reminders stay in sync.
+        """
+        if self._calendar is None:
+            self._calendar = CalendarDialog(parent=self)
+        else:
+            self._calendar.reload()
+        self._calendar.show()
+        self._calendar.raise_()
+        self._calendar.activateWindow()
+
+    def _check_reminders(self) -> None:
+        """Poll the appointment store and announce anything now due."""
+        self._appointments.load()  # pick up edits made in the dialog / on disk
+        fire_due_reminders(
+            self._appointments,
+            self.say,
+            self.play_animation,
+            self._attention_anim,
+        )
 
     def _options(self) -> None:
         dlg = OptionsDialog(self.settings, self.tts.available)

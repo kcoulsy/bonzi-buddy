@@ -28,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     char = parse_acs(acs_path.read_bytes())
     pet = BonziPet(char)
     pet.quit_requested.connect(app.quit)
+    # quiesce timers/audio before Qt tears down, else shutdown can crash
+    app.aboutToQuit.connect(pet.cleanup)
     pet.enter()
 
     return app.exec()
