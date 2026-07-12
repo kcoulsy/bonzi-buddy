@@ -8,11 +8,54 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # needed to attach binaries to a Release on tag
+  contents: write # needed to commit/tag releases and attach binaries
 
 jobs:
+  prepare-release:
+    name: Bump release version
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.version.outputs.ref }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump patch version and create tag
+        id: version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          version=$(python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("pyproject.toml")
+          text = path.read_text()
+          match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"$', text, re.MULTILINE)
+          if not match:
+              raise SystemExit("Could not find a semantic project version")
+
+          major, minor, patch = map(int, match.groups())
+          next_version = f"{major}.{minor}.{patch + 1}"
+          path.write_text(text[:match.start(1)] + next_version + text[match.end(1):])
+          print(next_version)
+          PY
+          )
+          tag="v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: release $tag"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin HEAD:main "$tag"
+          printf 'ref=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.name }})
+    needs: prepare-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,6 +71,8 @@ jobs:
             name: macos-x64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.ref || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -76,8 +121,8 @@ jobs:
 
   release:
     name: Attach to release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [prepare-release, build]
+    if: needs.prepare-release.outputs.tag != '' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -87,6 +132,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare-release.outputs.tag || github.ref_name }}
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip

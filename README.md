@@ -1,21 +1,10 @@
 # Bonzi for Linux
 
-A native **Python + Qt (PySide6)** port of *BonziBUDDY Rewritten* — the purple
-Microsoft Agent desktop pet — running directly on Linux. No Wine, no .NET, no
-Microsoft Agent runtime: the `.acs` character file is decoded and animated by
-this project.
-
-## Status
-
-- ✅ **`.acs` decoder** — full Microsoft Agent v2 format: header, palette, the
-  bit-stream LZ77 image codec, all 1246 sprites, 148 animations, 22 sounds,
-  voice and state metadata. Lazy-decoded (instant startup).
-- ✅ **Desktop pet MVP** — frameless, transparent, always-on-top, draggable
-  Bonzi that plays animations, idles, greets, and speaks with a word balloon +
-  system TTS. Right-click menu: *Say something*, *Tell a joke*, *Animate ▸*
-  (every animation), *Goodbye*.
-- ⏳ **Feature parity** — search, sing, calendar/reminders, download manager,
-  eBook reader, options, themes (ported from the decompiled original).
+A port of *BonziBUDDY Rewritten* — the purple Microsoft Agent desktop pet. There are few reasons for porting this:
+ - the original was getting flagged as malware and I wanted to inspect the code
+ - the original required .NET framework 2.0
+ - I wanted it to be cross platform compatible as I use linux
+ - I wanted the source code to be open so it can be reviewed that it's not a virus
 
 ## Run
 
@@ -32,24 +21,3 @@ still shows):
 sudo pacman -S espeak-ng        # recommended
 # or: festival, or speech-dispatcher (spd-say)
 ```
-
-## Layout
-
-```
-src/bonzi/
-  acs/        # the .acs decoder (reader, rle codec, image, parser, lazy store)
-  runtime/    # Qt runtime (player, tts, balloon, pet widget)
-  app.py      # entry point
-tools/dump_acs.py   # decoder verification: dumps sprites/frames to PNG
-assets/             # Bonzi.acs + theme images (from the original install)
-decompiled/         # ILSpy decompilation of the original app (reference)
-reference/          # .acs format reference implementation
-```
-
-## Origin & safety
-
-Ported from the abandonware *BonziBUDDY Rewritten* by tmafe.com. A full static
-audit of the original binaries (see `decompiled/`) found **no malware** — the
-antivirus flags are false positives triggered by the "BonziBuddy" name, the MS
-Agent desktop-pet behaviour, and an ancient unsigned installer. No registry
-persistence, no C2, no silent downloads.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSettings
 
+from .balloon import DEFAULT_BALLOON_THEME
 from .features import DEFAULT_ENGINE
 
 
@@ -34,6 +35,37 @@ class Settings:
     @tts_enabled.setter
     def tts_enabled(self, v: bool) -> None:
         self._s.setValue("tts_enabled", bool(v))
+
+    # -- character selection --
+
+    @property
+    def character_path(self) -> str:
+        """Absolute path of the last-selected ``.acs`` character ("" = unset)."""
+        return str(self._s.value("character_path", ""))
+
+    @character_path.setter
+    def character_path(self, v: str) -> None:
+        self._s.setValue("character_path", v)
+
+    @property
+    def character_dir(self) -> str:
+        """Optional extra directory scanned for user ``.acs`` files ("" = none)."""
+        return str(self._s.value("character_dir", ""))
+
+    @character_dir.setter
+    def character_dir(self, v: str) -> None:
+        self._s.setValue("character_dir", v)
+
+    # -- appearance --
+
+    @property
+    def balloon_theme(self) -> str:
+        """Key of the selected speech-balloon accent theme."""
+        return str(self._s.value("balloon_theme", DEFAULT_BALLOON_THEME))
+
+    @balloon_theme.setter
+    def balloon_theme(self, v: str) -> None:
+        self._s.setValue("balloon_theme", v)
 
     @property
     def first_run(self) -> bool:

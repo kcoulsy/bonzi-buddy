@@ -72,6 +72,11 @@ class TtsEngine(QObject):
     def available(self) -> bool:
         return self._base is not None
 
+    @property
+    def supports_ssml(self) -> bool:
+        """espeak(-ng) can render the SSML we use to sing melodies."""
+        return bool(self._base) and self._base[0] in ("espeak-ng", "espeak")
+
     def _voice_args(self, voice: Voice | None) -> list[str]:
         if not self._base or self._base[0] not in ("espeak-ng", "espeak") or voice is None:
             return []
@@ -87,9 +92,18 @@ class TtsEngine(QObject):
         text = text.strip()
         if not text or not self._base:
             return
+        self._launch([*self._base, *self._extra, text])
+
+    def sing(self, ssml: str, wpm: int) -> None:
+        """Sing an SSML document (per-syllable pitch) via espeak-ng SSML mode."""
+        if not self.supports_ssml:
+            return
+        self._launch([*self._base, "-m", "-s", str(wpm), ssml])
+
+    def _launch(self, cmd: list[str]) -> None:
         self.stop()
         try:
-            proc = subprocess.Popen([*self._base, *self._extra, text])
+            proc = subprocess.Popen(cmd)
         except Exception:
             return
         worker = _SpeakWorker(proc)

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
 )
 
+from .balloon import BALLOON_THEMES
 from .features import SEARCH_ENGINES
 from .settings import Settings
 
@@ -31,9 +32,16 @@ class OptionsDialog(QDialog):
         if not tts_available:
             self._tts.setText("Speak out loud — install espeak-ng to enable")
 
+        self._balloon = QComboBox()
+        for theme in BALLOON_THEMES.values():
+            self._balloon.addItem(theme.label, theme.key)
+        idx = self._balloon.findData(settings.balloon_theme)
+        self._balloon.setCurrentIndex(idx if idx >= 0 else 0)
+
         form = QFormLayout(self)
         form.addRow("Your name:", self._name)
         form.addRow("Search engine:", self._engine)
+        form.addRow("Balloon style:", self._balloon)
         form.addRow(self._tts)
 
         buttons = QDialogButtonBox(
@@ -48,5 +56,6 @@ class OptionsDialog(QDialog):
         if name:
             self._s.name = name
         self._s.search_engine = self._engine.currentText()
+        self._s.balloon_theme = self._balloon.currentData()
         self._s.tts_enabled = self._tts.isChecked()
         self.accept()

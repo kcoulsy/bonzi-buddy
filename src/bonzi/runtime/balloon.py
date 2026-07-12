@@ -1,6 +1,13 @@
-"""A classic Microsoft Agent style speech balloon (frameless, on-top)."""
+"""A classic Microsoft Agent style speech balloon (frameless, on-top).
+
+The balloon's accent — background, text and border colours — is a swappable
+:class:`BalloonTheme` so the user can pick a light/dark style. This replaces the
+original's single hardcoded pale-yellow look while keeping "classic" as default.
+"""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
@@ -10,9 +17,38 @@ _PAD = 12
 _MAX_W = 260
 _TAIL = 12
 
+Rgb = tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class BalloonTheme:
+    """Accent colours for the speech balloon."""
+
+    key: str
+    label: str
+    bg: Rgb
+    fg: Rgb
+    border: Rgb
+
+
+# a small set of presets the user picks from in Options; "classic" matches the
+# original pale-yellow BonziBUDDY balloon and stays the default.
+BALLOON_THEMES: dict[str, BalloonTheme] = {
+    "classic": BalloonTheme("classic", "Classic (pale yellow)", (255, 255, 224), (20, 20, 20), (90, 90, 90)),
+    "light": BalloonTheme("light", "Light", (250, 250, 250), (20, 20, 20), (150, 150, 150)),
+    "dark": BalloonTheme("dark", "Dark", (44, 46, 52), (235, 235, 235), (20, 20, 20)),
+    "sky": BalloonTheme("sky", "Sky blue", (223, 240, 255), (15, 25, 40), (120, 150, 190)),
+}
+DEFAULT_BALLOON_THEME = "classic"
+
+
+def balloon_theme_for(key: str) -> BalloonTheme:
+    """The theme named ``key``, falling back to the default for anything else."""
+    return BALLOON_THEMES.get(key, BALLOON_THEMES[DEFAULT_BALLOON_THEME])
+
 
 class Balloon(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, theme: BalloonTheme | None = None) -> None:
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint
@@ -22,9 +58,15 @@ class Balloon(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self._theme = theme or BALLOON_THEMES[DEFAULT_BALLOON_THEME]
         self._text = ""
         self._lines: list[str] = []
         self._font = QFont("Sans Serif", 10)
+
+    def set_theme(self, theme: BalloonTheme) -> None:
+        """Swap the accent theme and repaint if currently shown."""
+        self._theme = theme
+        self.update()
 
     def _wrap(self, text: str) -> list[str]:
         fm = QFontMetrics(self._font)
@@ -69,11 +111,11 @@ class Balloon(QWidget):
         path.lineTo(cx, h - 2)
         path.lineTo(cx + 10, body_h - 2)
 
-        p.setPen(QPen(QColor(90, 90, 90), 1))
-        p.setBrush(QColor(255, 255, 224))  # pale yellow, like the original
+        p.setPen(QPen(QColor(*self._theme.border), 1))
+        p.setBrush(QColor(*self._theme.bg))
         p.drawPath(path)
 
-        p.setPen(QColor(20, 20, 20))
+        p.setPen(QColor(*self._theme.fg))
         p.setFont(self._font)
         fm = QFontMetrics(self._font)
         y = _PAD + fm.ascent()

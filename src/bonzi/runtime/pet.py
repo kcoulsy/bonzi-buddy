@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCursor, QPainter, QPixmap
@@ -11,7 +12,8 @@ from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
 from .. import content
 from ..acs.model import Character
 from . import features
-from .balloon import Balloon
+from .balloon import Balloon, balloon_theme_for
+from .characters import discover
 from .calendar import (
     ATTENTION_ANIMS,
     AppointmentStore,
@@ -41,8 +43,9 @@ REST_ANIM = "RestPose"
 
 class BonziPet(QWidget):
     quit_requested = Signal()
+    switch_requested = Signal(str)  # path of an .acs character to swap to
 
-    def __init__(self, char: Character) -> None:
+    def __init__(self, char: Character, source_path: Path | None = None) -> None:
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint
@@ -50,6 +53,7 @@ class BonziPet(QWidget):
             | Qt.WindowType.Tool,
         )
         self.char = char
+        self.source_path = Path(source_path) if source_path is not None else None
         self.settings = Settings()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle(char.name or "Bonzi")
@@ -79,7 +83,7 @@ class BonziPet(QWidget):
         self.tts = TtsEngine(char.voice, self)
         self.tts.stopped.connect(self._on_tts_stopped)
 
-        self.balloon = Balloon()
+        self.balloon = Balloon(balloon_theme_for(self.settings.balloon_theme))
 
         # lip-sync: swaps mouth shapes while speaking
         self._mouth_timer = QTimer(self)
@@ -113,17 +117,22 @@ class BonziPet(QWidget):
 
     # -- lifecycle --
 
-    def enter(self) -> None:
-        """Show + greet on startup."""
+    def enter(self, greeting: str | None = None) -> None:
+        """Show + greet on startup (or after a character swap).
+
+        Pass ``greeting`` to override the default first-run/returning message —
+        used when swapping characters so the new one introduces itself.
+        """
         self.show()
         if not self.player.play(SHOW_ANIM):
             self.player.play(REST_ANIM)
-        greeting = (
-            "Hello! I'm Bonzi. Right-click me to see what I can do!"
-            if self.settings.first_run
-            else f"Welcome back, {self.settings.name}! Right-click me anytime."
-        )
-        self.settings.first_run = False
+        if greeting is None:
+            greeting = (
+                "Hello! I'm Bonzi. Right-click me to see what I can do!"
+                if self.settings.first_run
+                else f"Welcome back, {self.settings.name}! Right-click me anytime."
+            )
+            self.settings.first_run = False
         QTimer.singleShot(700, lambda: self.say(greeting))
 
     def leave(self) -> None:
@@ -147,9 +156,27 @@ class BonziPet(QWidget):
         self.sounds.stop_all()
         self.balloon.hide()
 
+    def dispose(self) -> None:
+        """Fully tear down this pet for a character swap.
+
+        Beyond :meth:`cleanup` (which only quiesces timers/audio), this frees the
+        top-level widgets the pet owns but that are *not* Qt children of it — the
+        balloon is a separate always-on-top window and would otherwise leak. Any
+        child dialogs (downloader/calendar/reader) are parented to the pet and
+        are reclaimed when it is deleted.
+        """
+        self.cleanup()
+        self.balloon.close()
+        self.balloon.deleteLater()
+
     # -- speech --
 
-    def say(self, text: str) -> None:
+    def say(self, text: str, *, ssml: str | None = None, wpm: int = 130) -> None:
+        """Speak (or, when ``ssml`` is given and supported, sing) ``text``.
+
+        ``text`` is always what appears in the balloon; ``ssml`` carries the
+        per-syllable pitch markup used to sing the melody via espeak-ng.
+        """
         text = text.strip()
         if not text:
             return
@@ -157,10 +184,15 @@ class BonziPet(QWidget):
         self._show_balloon(text)
         self.player.hard_stop()  # hold the rest pose; the mouth does the work
         if self.tts.available and self.settings.tts_enabled:
-            self.tts.speak(text)
+            if ssml and self.tts.supports_ssml:
+                self.tts.sing(ssml, wpm)
+            else:
+                self.tts.speak(text)
         else:
-            # no engine (or muted): keep the balloon up a readable while
-            QTimer.singleShot(1400 + 45 * len(text), self._on_tts_stopped)
+            # no engine (or muted): keep the balloon up a readable while.
+            # songs run long, so hold the balloon proportionally longer.
+            hold = (2600 if ssml else 1400) + 45 * len(text)
+            QTimer.singleShot(hold, self._on_tts_stopped)
 
         if self.player.has_mouth_shapes:
             self._mouth_timer.start(85)
@@ -283,10 +315,41 @@ class BonziPet(QWidget):
             act.triggered.connect(lambda _=False, n=name: self.play_animation(n))
             anim_menu.addAction(act)
 
+        self._add_characters_menu(menu)
+
         menu.addSeparator()
         add("Options…", self._options)
         add("Goodbye (quit)", self.leave)
         menu.exec(QCursor.pos())
+
+    def _add_characters_menu(self, menu: QMenu) -> None:
+        """Build the "Characters ▸" submenu of every discovered ``.acs`` file.
+
+        The active character is checked and disabled; picking any other emits
+        :attr:`switch_requested` for the controller to rebuild the pet. Gracefully
+        shows a disabled placeholder when nothing is found.
+        """
+        char_menu = menu.addMenu("Characters")
+        extra = self.settings.character_dir
+        entries = discover(Path(extra) if extra else None)
+        current = self.source_path.resolve() if self.source_path else None
+        if not entries:
+            placeholder = QAction("(no characters found)", char_menu)
+            placeholder.setEnabled(False)
+            char_menu.addAction(placeholder)
+            return
+        for entry in entries:
+            act = QAction(entry.name, char_menu)
+            act.setCheckable(True)
+            is_current = current is not None and entry.path.resolve() == current
+            act.setChecked(is_current)
+            if is_current:
+                act.setEnabled(False)  # already the active character
+            else:
+                act.triggered.connect(
+                    lambda _=False, p=str(entry.path): self.switch_requested.emit(p)
+                )
+            char_menu.addAction(act)
 
     def _prompt_say(self) -> None:
         text, ok = QInputDialog.getText(self, "Bonzi", "What should I say?")
@@ -306,9 +369,8 @@ class BonziPet(QWidget):
         if song is None:
             self.say("La la la! I don't have my songbook right now.")
             return
-        lyrics = content.song_lyrics(song)
-        intro = f"Here's a song for you — {song['title']}, by {song['author']}. ♪"
-        self.say(f"{intro} {lyrics}")
+        display, ssml, wpm = content.song_performance(song)
+        self.say(display, ssml=ssml, wpm=wpm)
 
     def _prompt_search(self) -> None:
         query, ok = QInputDialog.getText(self, "Bonzi Search", "What shall I search for?")
@@ -360,3 +422,5 @@ class BonziPet(QWidget):
     def _options(self) -> None:
         dlg = OptionsDialog(self.settings, self.tts.available)
         dlg.exec()
+        # apply any accent change immediately so the next balloon reflects it
+        self.balloon.set_theme(balloon_theme_for(self.settings.balloon_theme))
