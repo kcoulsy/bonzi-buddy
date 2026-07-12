@@ -12,6 +12,7 @@ from .. import content
 from ..acs.model import Character
 from . import features
 from .balloon import Balloon
+from .downloader import DownloadManager
 from .options_dialog import OptionsDialog
 from .player import AnimationPlayer
 from .settings import Settings
@@ -48,6 +49,7 @@ class BonziPet(QWidget):
 
         self._pix: QPixmap | None = None
         self._drag_offset: QPoint | None = None
+        self._downloader: DownloadManager | None = None
         self._speaking = False
         self._busy = False  # a one-shot animation (greet/idle/emote) is playing
 
@@ -218,6 +220,9 @@ class BonziPet(QWidget):
         menu.addSeparator()
         add("Search the web…", self._prompt_search)
 
+        add("Download Manager…", self._open_downloader)
+        menu.addSeparator()
+
         surf = menu.addMenu("Go online")
         for label, url in features.LINKS.items():
             a = QAction(label, surf)
@@ -260,6 +265,14 @@ class BonziPet(QWidget):
         if ok and query.strip():
             self.say(f"Let me search the web for {query}!")
             features.search(query.strip(), self.settings.search_engine)
+
+    def _open_downloader(self) -> None:
+        """Open the Download Manager, keeping a single shared instance."""
+        if self._downloader is None:
+            self._downloader = DownloadManager(self)
+        self._downloader.show()
+        self._downloader.raise_()
+        self._downloader.activateWindow()
 
     def _options(self) -> None:
         dlg = OptionsDialog(self.settings, self.tts.available)

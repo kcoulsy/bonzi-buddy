@@ -42,3 +42,27 @@ class Settings:
     @first_run.setter
     def first_run(self, v: bool) -> None:
         self._s.setValue("first_run", bool(v))
+
+    # -- Download Manager options (mirrors DMOptions.cs) --
+
+    @property
+    def dm_prompt_folder(self) -> bool:
+        """Prompt for a destination folder before each download (ShowFilePrompt)."""
+        return self._s.value("dm_prompt_folder", False, type=bool)
+
+    @dm_prompt_folder.setter
+    def dm_prompt_folder(self, v: bool) -> None:
+        self._s.setValue("dm_prompt_folder", bool(v))
+
+    @property
+    def dm_run_on_complete(self) -> bool:
+        """Launch a downloaded file when it finishes (RunOnComplete).
+
+        Defaults to False for safety and only ever applies to files the user
+        added and downloaded themselves.
+        """
+        return self._s.value("dm_run_on_complete", False, type=bool)
+
+    @dm_run_on_complete.setter
+    def dm_run_on_complete(self, v: bool) -> None:
+        self._s.setValue("dm_run_on_complete", bool(v))
