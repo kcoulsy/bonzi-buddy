@@ -3,12 +3,11 @@ name: Build standalone binaries
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write # needed to commit/tag releases and attach binaries
+  contents: write # needed to commit releases and publish release assets
 
 jobs:
   prepare-release:
@@ -22,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Bump patch version and create tag
+      - name: Bump patch version
         id: version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
@@ -48,9 +47,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml
           git commit -m "chore: release $tag"
-          git tag -a "$tag" -m "Release $tag"
-          git push origin HEAD:main "$tag"
-          printf 'ref=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:main
+          printf 'ref=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
   build:
@@ -120,20 +118,23 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Attach to release
+    name: Publish release
     needs: [prepare-release, build]
-    if: needs.prepare-release.outputs.tag != '' || startsWith(github.ref, 'refs/tags/v')
+    if: needs.prepare-release.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare-release.outputs.tag || github.ref_name }}
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.zip
-          generate_release_notes: true
+      - name: Create release and upload archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+          TARGET: ${{ needs.prepare-release.outputs.ref }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --target "$TARGET" --generate-notes
+          fi

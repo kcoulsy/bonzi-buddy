@@ -1,6 +1,9 @@
-# Bonzi for Linux
+# Bonzi Buddy Port
 
-A port of *BonziBUDDY Rewritten* — the purple Microsoft Agent desktop pet. There are few reasons for porting this:
+A port of *BonziBUDDY Rewritten* — the purple Microsoft Agent desktop pet. 
+Full disclosure, AI did all of the porting here, not trying to take any credit. 
+
+There are few reasons for porting this:
  - the original was getting flagged as malware and I wanted to inspect the code
  - the original required .NET framework 2.0
  - I wanted it to be cross platform compatible as I use linux

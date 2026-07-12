@@ -22,6 +22,59 @@ a = Analysis(
     excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore"],
     noarchive=False,
 )
+
+# PyInstaller's Qt hook includes every plugin installed by the system package.
+# Bonzi needs the native desktop platform plus PNG/ICO support for its assets.
+qt_plugin_prefixes = (
+    "PySide6/Qt/plugins/egldeviceintegrations/",
+    "PySide6/Qt/plugins/generic/",
+    "PySide6/Qt/plugins/networkinformation/",
+    "PySide6/Qt/plugins/platforminputcontexts/",
+    "PySide6/Qt/plugins/platformthemes/",
+    "PySide6/Qt/plugins/styles/",
+    "PySide6/Qt/plugins/tls/",
+    "PySide6/Qt/plugins/wayland-",
+    "PySide6/Qt/plugins/xcbglintegrations/",
+)
+qt_unused_library_prefixes = (
+    "kf6", "layershell", "qt6pdf", "qt6qml", "qt6quick", "qt6virtualkeyboard",
+    "qt6wayland",
+)
+qt_unused_libraries = {
+    # These are brought in only by the excluded image-format plugins.
+    "libaom.so.3", "libavif.so.16", "libdav1d.so.7", "libglycin-2.so.0",
+    "libiex-3_4.so.33", "libilmthread-3_4.so.33", "libjbig.so.2.1",
+    "libjxl.so.0.12", "libjxl_cms.so.0.12", "libjxl_threads.so.0.12",
+    "libopenexr-3_4.so.33", "libopenexrcore-3_4.so.33", "libopenjph.so.0.30",
+    "libraw.so.25", "librav1e.so.0.8", "libsvtav1enc.so.4", "libtiff.so.6",
+    # NumPy's linear algebra backend is unused by the ACS parser.
+    "libblas.so.3", "libcblas.so.3", "libgfortran.so.5", "liblapack.so.3",
+}
+qt_platform_plugin = {
+    "linux": "libqxcb.so",
+    "win32": "qwindows.dll",
+    "darwin": "libqcocoa.dylib",
+}.get(sys.platform)
+
+
+def qt_name(path):
+    return Path(path).stem.lower().removeprefix("lib")
+
+
+a.binaries = [
+    entry for entry in a.binaries
+    if not entry[0].startswith(qt_plugin_prefixes)
+    and not (
+        entry[0].startswith("PySide6/Qt/plugins/imageformats/")
+        and qt_name(entry[0]) not in {"qgif", "qico", "qjpeg", "qpng"}
+    )
+    and not (
+        entry[0].startswith("PySide6/Qt/plugins/platforms/")
+        and Path(entry[0]).name != qt_platform_plugin
+    )
+    and not qt_name(entry[0]).startswith(qt_unused_library_prefixes)
+    and Path(entry[0]).name.lower() not in qt_unused_libraries
+]
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -32,7 +85,7 @@ exe = EXE(
     [],
     name="bonzi",
     debug=False,
-    strip=False,
+    strip=True,
     upx=False,
     console=False,           # GUI app: no terminal window on Windows
     disable_windowed_traceback=False,

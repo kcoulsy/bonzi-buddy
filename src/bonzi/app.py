@@ -8,8 +8,15 @@ can dispose the old widget and rebuild a fresh one against the new character.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+# Desktop pets need absolute window positioning, which the Wayland protocol
+# deliberately does not provide. Use XWayland on Linux unless the user opted
+# into a Qt platform backend explicitly.
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 from PySide6.QtWidgets import QApplication
 
