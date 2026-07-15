@@ -1,6 +1,6 @@
 [project]
 name = "bonzi-linux"
-version = "0.1.4"
+version = "0.1.5.1.4"
 description = "Native Linux (Python/Qt) port of BonziBUDDY Rewritten — a Microsoft Agent desktop pet"
 readme = "README.md"
 requires-python = ">=3.11"
