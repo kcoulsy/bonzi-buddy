@@ -85,7 +85,7 @@ jobs:
             libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
 
       - name: Install build deps
-        run: python -m pip install --only-binary=:all: -r requirements-build.txt
+        run: "python -m pip install --only-binary=:all: -r requirements-build.txt"
 
       - name: Build
         run: pyinstaller --clean --noconfirm packaging/bonzi.spec
@@ -122,9 +122,9 @@ jobs:
         with:
           name: bonzi-${{ matrix.name }}
           path: |
-             bonzi-${{ matrix.name }}.tar.gz
-             bonzi-${{ matrix.name }}.zip
-             bonzi-${{ matrix.name }}-onedir.zip
+            bonzi-${{ matrix.name }}.tar.gz
+            bonzi-${{ matrix.name }}.zip
+            bonzi-${{ matrix.name }}-onedir.zip
           if-no-files-found: error
 
   release:
