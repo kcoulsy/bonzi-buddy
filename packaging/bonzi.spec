@@ -1,5 +1,6 @@
 # PyInstaller spec — one self-contained executable with all assets baked in.
 # Build:  pyinstaller packaging/bonzi.spec
+import os
 import sys
 from pathlib import Path
 
@@ -75,22 +76,42 @@ a.binaries = [
     and not qt_name(entry[0]).startswith(qt_unused_library_prefixes)
     and Path(entry[0]).name.lower() not in qt_unused_libraries
 ]
+
+if sys.platform == "win32":
+    # These API-set DLLs are Windows loader forwarders, not application
+    # dependencies. Windows 10/11 supplies their contracts; app-local copies
+    # from the build Python can shadow the OS mapping during bootstrapping.
+    a.binaries = [
+        entry for entry in a.binaries
+        if not Path(entry[0]).name.lower().startswith("api-ms-win-")
+    ]
+
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name="bonzi",
-    debug=False,
-    strip=True,
-    upx=False,
-    console=False,           # GUI app: no terminal window on Windows
-    disable_windowed_traceback=False,
-    icon=icon,
-)
+onefile = os.environ.get("BONZI_BUILD_MODE", "onefile") == "onefile"
+
+if onefile:
+    exe = EXE(
+        pyz, a.scripts, a.binaries, a.datas, [], name="bonzi",
+        debug=False,
+        # GNU strip modifies Python and runtime PE DLLs. Do not process them.
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        icon=icon,
+    )
+else:
+    exe = EXE(
+        pyz, a.scripts, [], exclude_binaries=True, name="bonzi",
+        debug=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        icon=icon,
+    )
+    COLLECT(exe, a.binaries, a.datas, name="bonzi-onedir")
 
 # On macOS, also wrap the binary in a double-clickable .app bundle.
 if sys.platform == "darwin":

@@ -72,7 +72,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.10"
 
       # Qt needs a few system libs present so PyInstaller can discover/bundle them.
       - name: Install Qt runtime deps (Linux)
@@ -85,10 +85,19 @@ jobs:
             libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
 
       - name: Install build deps
-        run: python -m pip install --upgrade pip pyinstaller PySide6 numpy pillow
+        run: python -m pip install --only-binary=:all: -r requirements-build.txt
 
       - name: Build
         run: pyinstaller --clean --noconfirm packaging/bonzi.spec
+
+      # Keep this alongside the release one-file build until the startup issue
+      # has been verified on a clean Windows 11 machine.
+      - name: Build one-dir diagnostic (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:BONZI_BUILD_MODE = "onedir"
+          pyinstaller --clean --noconfirm packaging/bonzi.spec
 
       # --- package into a plain archive: unzip and run, no installer ---
       - name: Package (Linux)
@@ -104,15 +113,18 @@ jobs:
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/bonzi.exe, README.md -DestinationPath "bonzi-${{ matrix.name }}.zip"
+        run: |
+          Compress-Archive -Path dist/bonzi.exe, README.md -DestinationPath "bonzi-${{ matrix.name }}.zip"
+          Compress-Archive -Path dist/bonzi-onedir, README.md -DestinationPath "bonzi-${{ matrix.name }}-onedir.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bonzi-${{ matrix.name }}
           path: |
-            bonzi-${{ matrix.name }}.tar.gz
-            bonzi-${{ matrix.name }}.zip
+             bonzi-${{ matrix.name }}.tar.gz
+             bonzi-${{ matrix.name }}.zip
+             bonzi-${{ matrix.name }}-onedir.zip
           if-no-files-found: error
 
   release:

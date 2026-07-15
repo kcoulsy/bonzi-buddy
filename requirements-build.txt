@@ -1,0 +1,7 @@
+# Release build inputs. Keep these pinned so the embedded bootloader and native
+# wheels do not change when GitHub Actions runs again.
+PyInstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6
+PySide6==6.11.1
+numpy==2.5.1
+Pillow==12.3.0
