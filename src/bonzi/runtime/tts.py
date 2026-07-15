@@ -12,6 +12,7 @@ Supported engines (checked in order):
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import subprocess
@@ -63,14 +64,7 @@ def _find_engine() -> list[str] | None:
     if sys.platform == "win32":
         ps = shutil.which("powershell")
         if ps:
-            return [
-                ps,
-                "-NoProfile",
-                "-Command",
-                "Add-Type -AssemblyName System.Speech;"
-                "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-                "$s.Speak([System.IO.File]::ReadAllText($args[0]))",
-            ]
+            return [ps]
         return None
 
     if sys.platform == "darwin":
@@ -86,6 +80,20 @@ def _find_engine() -> list[str] | None:
     if shutil.which("spd-say"):
         return ["spd-say", "-w"]  # -w: wait for playback to finish
     return None
+
+
+def _windows_speech_command(powershell: str, text: str) -> list[str]:
+    """Build a PowerShell command without parsing spoken text as PowerShell."""
+    # PowerShell's -Command appends later arguments to its source text. Encode
+    # the complete script instead, preserving spaces, punctuation, and Unicode.
+    quoted_text = text.replace("'", "''")
+    script = (
+        "Add-Type -AssemblyName System.Speech;"
+        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+        f"$s.Speak('{quoted_text}')"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    return [powershell, "-NoProfile", "-EncodedCommand", encoded]
 
 
 class _SpeakWorker(QThread):
@@ -156,6 +164,9 @@ class TtsEngine(QObject):
     def speak(self, text: str) -> None:
         text = text.strip()
         if not text or not self._base:
+            return
+        if sys.platform == "win32":
+            self._launch(_windows_speech_command(self._base[0], text))
             return
         self._launch([*self._base, *self._extra, text])
 
